@@ -1,15 +1,12 @@
 // Timeline Visualization Configuration
 const config = {
     margin: { top: 80, right: 100, bottom: 80, left: 100 },
-    width: 1200,
-    timelineLineOffset: 300, // Position of timeline from left
-    milestoneRadius: 8,
+    minWidth: 800, // Minimum width for readability
+    milestoneSquare: 8,
     yearEndpointRadius: 6,
     colors: {
-        timeline: '#2c3e50',
-        milestone: '#3498db',
-        milestoneActive: '#e74c3c',
-        text: '#34495e'
+        timeline: '#000000',
+        text: '#000000'
     },
     categoryColors: {
         'Founding': '#1D315F',
@@ -61,6 +58,7 @@ async function loadData() {
         const data = await d3.csv(csvPath, d => {
             return {
                 date: new Date(d.date),
+                endDate: d.endDate ? new Date(d.endDate) : null, // Optional end date for spans
                 title: d.title,
                 description: d.description,
                 category: d.category || 'General'
@@ -89,6 +87,17 @@ function setupVisualization(data) {
     // Clear any existing content
     container.selectAll('*').remove();
     
+    // Calculate responsive width based on container
+    const containerWidth = container.node().getBoundingClientRect().width;
+    const svgWidth = Math.max(containerWidth, config.minWidth);
+    
+    // Calculate timeline offset to center it (accounting for margins)
+    const timelineLineOffset = (svgWidth - config.margin.left - config.margin.right) / 2;
+    
+    // Store in config for use in drawTimeline
+    config.width = svgWidth;
+    config.timelineLineOffset = timelineLineOffset;
+    
     // Calculate height based on data - from earliest to end of 2026
     const startDate = new Date(2021, 0, 1);
     const endDate = new Date(2027, 0, 1);
@@ -106,8 +115,9 @@ function setupVisualization(data) {
     // Create SVG
     svg = container
         .append('svg')
-        .attr('width', config.width)
+        .attr('width', '100%')
         .attr('height', calculatedHeight)
+        .attr('viewBox', `0 0 ${svgWidth} ${calculatedHeight}`)
         .attr('class', 'timeline-svg');
     
     // Create main group for timeline
@@ -124,6 +134,7 @@ function drawTimeline(data) {
     const year2021LineHeight = 150; // Short line for 2021
     const otherYearLineHeight = yearHeight - 100; // Line height for other years
     const gapBetweenYears = 100; // Space between end of one year line and start of next
+    const titleAxisGap = 26; // Gap between timeline axis and title text (16px added for month labels)
     const years = [2021, 2022, 2023, 2024, 2025, 2026];
     const monthNames = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
     
@@ -233,32 +244,86 @@ function drawTimeline(data) {
         .attr('transform', d => `translate(${config.timelineLineOffset}, ${yScale(d.date)})`)
         .attr('opacity', 0.3); // Start semi-transparent
     
-    // Add squares for milestones with category colors
-    milestones.append('rect')
-        .attr('class', 'milestone-marker')
-        .attr('x', -config.milestoneRadius)
-        .attr('y', -config.milestoneRadius)
-        .attr('width', config.milestoneRadius * 2)
-        .attr('height', config.milestoneRadius * 2)
-        .attr('fill', d => config.categoryColors[d.category] || config.colors.milestone);
+    // Add squares/rectangles for milestones with category colors
+    // Alternate between right (even index) and left (odd index) sides
+    // Use rectangles for time spans, squares for single points
+    milestones.each(function(d, i) {
+        const milestone = d3.select(this);
+        const isTimeSpan = d.endDate && d.endDate > d.date;
+        const color = config.categoryColors[d.category] || config.colors.milestone;
+        
+        if (isTimeSpan) {
+            // Calculate the height of the rectangle based on date span
+            const startY = 0; // Already positioned at start date by transform
+            const endY = yScale(d.endDate) - yScale(d.date); // Height from start to end
+            
+            // Draw rectangle spanning the time range
+            milestone.append('rect')
+                .attr('class', 'milestone-marker milestone-span')
+                .attr('x', i % 2 === 0 ? 1.5 : -(config.milestoneSquare * 2 + 1.5))
+                .attr('y', -config.milestoneSquare) // Start from top of square position
+                .attr('width', config.milestoneSquare * 2)
+                .attr('height', endY + config.milestoneSquare * 2) // Extend to end date
+                .attr('fill', color)
+                .attr('fill-opacity', 0.75); // 75% opacity for spans
+        } else {
+            // Draw square for single point in time
+            milestone.append('rect')
+                .attr('class', 'milestone-marker milestone-point')
+                .attr('x', i % 2 === 0 ? 1.5 : -(config.milestoneSquare * 2 + 1.5))
+                .attr('y', -config.milestoneSquare)
+                .attr('width', config.milestoneSquare * 2)
+                .attr('height', config.milestoneSquare * 2)
+                .attr('fill', color);
+        }
+    });
     
-    // Add title labels (right side)
-    milestones.append('text')
+    // Add title labels (alternating sides, centered with square)
+    const titleElements = milestones.append('text')
         .attr('class', 'milestone-title')
-        .attr('x', 20)
-        .attr('y', 0)
-        .attr('text-anchor', 'start')
-        .text(d => d.title);
+        .attr('x', (d, i) => i % 2 === 0 ? config.milestoneSquare * 2 + titleAxisGap : -(config.milestoneSquare * 2 + titleAxisGap)) // After square on right or left
+        .attr('y', 0) // Centered vertically with square
+        .attr('text-anchor', (d, i) => i % 2 === 0 ? 'start' : 'end') // Left-aligned on right, right-aligned on left
+        .attr('dominant-baseline', 'middle');
     
-    // Add description labels (right side, below title)
+    // Wrap title text and store line counts
+    const titleLineCounts = [];
+    // Calculate max text width based on available space on each side
+    // Available space = (timelineOffset - square - titleAxisGap - descriptionIndent - buffer)
+    const availableSpace = config.timelineLineOffset - config.milestoneSquare * 2 - titleAxisGap - 60 - 50;
+    const maxTextWidth = Math.max(280, Math.min(450, availableSpace)); // Between 280-450px
+    titleElements.each(function(d, i) {
+        const lineCount = wrapText(d3.select(this), d.title, maxTextWidth);
+        titleLineCounts[i] = lineCount;
+    });
+    
+    // Add description labels (alternating sides, below title, indented)
+    // Position dynamically based on title line count
     milestones.append('text')
         .attr('class', 'milestone-description')
-        .attr('x', 20)
-        .attr('y', 20)
-        .attr('text-anchor', 'start')
+        .attr('x', (d, i) => i % 2 === 0 ? config.milestoneSquare * 2 + titleAxisGap + 60 : -(config.milestoneSquare * 2 + titleAxisGap + 60)) // Indented from title
+        .attr('y', function(d, i) {
+            // Calculate y position based on title line count
+            // Title font-size is 18px, line-height is 1.2 em
+            // For multi-line titles: start at y=0 (middle of first line)
+            // Add (lineCount - 1) * lineSpacing for additional lines
+            // Then add spacing between title and description
+            const titleFontSize = 18;
+            const titleLineHeight = 1.2;
+            const lineSpacing = titleFontSize * titleLineHeight; // ~21.6px per line
+            const gapBetweenTitleAndDesc = 16;
+            
+            // If single line: start at y=0 (middle), go down half line + gap
+            // If multi-line: start at y=0, add (lineCount-1) full lines, add half line, add gap
+            const additionalLinesOffset = (titleLineCounts[i] - 1) * lineSpacing;
+            const halfLineOffset = lineSpacing / 2;
+            
+            return additionalLinesOffset + halfLineOffset + gapBetweenTitleAndDesc;
+        })
+        .attr('text-anchor', (d, i) => i % 2 === 0 ? 'start' : 'end') // Match title alignment
         .each(function(d) {
             // Wrap long text
-            wrapText(d3.select(this), d.description, 400);
+            wrapText(d3.select(this), d.description, maxTextWidth);
         });
 }
 
@@ -315,12 +380,8 @@ function activateMilestone(index) {
             .duration(300)
             .attr('opacity', isActive ? 1 : isPast ? 0.6 : 0.3);
         
-        // Update circle color
-        milestone.select('.milestone-marker')
-            .transition()
-            .duration(300)
-            .attr('fill', isActive ? config.colors.milestoneActive : config.colors.milestone)
-            .attr('r', isActive ? config.milestoneRadius * 1.5 : config.milestoneRadius);
+        // Keep the category color, no red highlighting
+        // Squares remain at their original size and color
     });
 }
 
@@ -352,6 +413,7 @@ function updateTimelineOnScroll(data) {
 
 /**
  * Wrap text to fit within a specified width
+ * Returns the number of lines created
  */
 function wrapText(textElement, text, maxWidth) {
     const words = text.split(/\s+/);
@@ -383,6 +445,8 @@ function wrapText(textElement, text, maxWidth) {
                 .text(word);
         }
     });
+    
+    return lineNumber + 1; // Return total number of lines
 }
 
 /**
@@ -403,7 +467,8 @@ function displayError(message) {
         .html(`
             <h3>Error Loading Timeline</h3>
             <p>${message}</p>
-            <p>Please ensure a CSV file exists at <code>data/milestones.csv</code> with columns: date, title, description</p>
+            <p>Please ensure a CSV file exists at <code>data/milestones.csv</code> with columns: date, title, description, category</p>
+            <p>Optional: add an <code>endDate</code> column for time-span milestones</p>
         `);
 }
 
@@ -413,3 +478,12 @@ if (document.readyState === 'loading') {
 } else {
     init();
 }
+
+// Handle window resize with debouncing
+let resizeTimeout;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+        init(); // Reinitialize with new dimensions
+    }, 250); // Wait 250ms after resize stops
+});

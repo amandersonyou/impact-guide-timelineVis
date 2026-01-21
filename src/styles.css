@@ -77,8 +77,8 @@ main {
 }
 
 .milestone-marker {
-    stroke: #fff;
-    stroke-width: 2;
+    /* stroke: #fff; */
+    /* stroke-width: 2; */
     transition: all 0.3s ease;
 }
 
@@ -106,7 +106,7 @@ main {
 
 /* Active Milestone State */
 .milestone.active .milestone-marker {
-    fill: #e74c3c;
+    /* Keep original category color, no red highlight */
 }
 
 /* Error Message Styles */
@@ -131,9 +131,7 @@ main {
 }
 
 /* Responsive Design */
-@media (max-width: 1024px) {
-    .timeline-svg {
-        width: 100%;
-        height: auto;
-    }
+.timeline-svg {
+    max-width: 100%;
+    height: auto;
 }
