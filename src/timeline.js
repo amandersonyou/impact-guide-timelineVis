@@ -21,7 +21,7 @@ const config = {
 
 // Global variables
 let svg, timelineGroup, milestones, yScale;
-let currentActiveIndex = -1;
+let currentActiveIndex = 0; // Start with first milestone active
 
 /**
  * Initialize the visualization
@@ -241,8 +241,15 @@ function drawTimeline(data) {
         .data(data)
         .join('g')
         .attr('class', 'milestone')
-        .attr('transform', d => `translate(${config.timelineLineOffset}, ${yScale(d.date)})`)
-        .attr('opacity', 0.3); // Start semi-transparent
+        .attr('transform', d => {
+            let yPos = yScale(d.date);
+            // Center 2021 milestones on the short line
+            if (d.date.getFullYear() === 2021) {
+                yPos = year2021LineHeight / 2; // Center on 2021 line
+            }
+            return `translate(${config.timelineLineOffset}, ${yPos})`;
+        })
+        .attr('opacity', (d, i) => i === 0 ? 1 : 0.3); // First milestone starts active
     
     // Add squares/rectangles for milestones with category colors
     // Alternate between right (even index) and left (odd index) sides
@@ -257,17 +264,17 @@ function drawTimeline(data) {
             const startY = 0; // Already positioned at start date by transform
             const endY = yScale(d.endDate) - yScale(d.date); // Height from start to end
             
-            // Draw rectangle spanning the time range
+            // Draw rectangle spanning the time range, centered on axis
             milestone.append('rect')
                 .attr('class', 'milestone-marker milestone-span')
-                .attr('x', i % 2 === 0 ? 1.5 : -(config.milestoneSquare * 2 + 1.5))
+                .attr('x', -config.milestoneSquare) // Centered on axis
                 .attr('y', -config.milestoneSquare) // Start from top of square position
                 .attr('width', config.milestoneSquare * 2)
                 .attr('height', endY + config.milestoneSquare * 2) // Extend to end date
                 .attr('fill', color)
                 .attr('fill-opacity', 0.75); // 75% opacity for spans
         } else {
-            // Draw square for single point in time
+            // Draw square for single point in time, aligned to side
             milestone.append('rect')
                 .attr('class', 'milestone-marker milestone-point')
                 .attr('x', i % 2 === 0 ? 1.5 : -(config.milestoneSquare * 2 + 1.5))
@@ -325,6 +332,34 @@ function drawTimeline(data) {
             // Wrap long text
             wrapText(d3.select(this), d.description, maxTextWidth);
         });
+    
+    // Add hover interactions for focus effect
+    milestones
+        .on('mouseenter', function(event, d) {
+            const hoveredMilestone = d3.select(this);
+            const hoveredIndex = +hoveredMilestone.attr('data-index');
+            
+            // Bring hovered milestone into full focus
+            milestones.each(function(d, i) {
+                const milestone = d3.select(this);
+                milestone.transition()
+                    .duration(200)
+                    .attr('opacity', i === hoveredIndex ? 1 : 0.3);
+            });
+        })
+        .on('mouseleave', function(event, d) {
+            // Restore opacity based on current scroll position
+            milestones.each(function(d, i) {
+                const milestone = d3.select(this);
+                const isActive = i === currentActiveIndex;
+                const isPast = i < currentActiveIndex;
+                
+                milestone.transition()
+                    .duration(200)
+                    .attr('opacity', isActive ? 1 : isPast ? 0.6 : 0.3);
+            });
+        })
+        .style('cursor', 'pointer');
 }
 
 /**
